@@ -59,14 +59,17 @@
   .page { display: none; } .page.active { display: block; }
   .hint { color: var(--dim); font-size: 12.5px; margin: -4px 0 12px; }
   .keybox { font-family: var(--mono); background: #0b0e13; padding: 10px; border-radius: 8px; word-break: break-all; border: 1px dashed var(--stroke); margin: 8px 0; font-size: 12.5px; }
-  /* playground */
-  #playlog { display: flex; flex-direction: column; gap: 10px; max-height: 420px; overflow: auto; margin-bottom: 12px; }
-  .msg { padding: 10px 13px; border-radius: 10px; font-size: 13.5px; line-height: 1.6; white-space: pre-wrap; word-break: break-word; max-width: 85%; }
-  .msg.user { background: #1f2c44; align-self: flex-end; border: 1px solid #31435f; }
-  .msg.assistant { background: var(--panel2); align-self: flex-start; border: 1px solid var(--stroke); }
-  .msg.sys { align-self: center; color: var(--dim); font-size: 12.5px; }
-  .msg.err { align-self: center; color: var(--bad); font-size: 12.5px; border: 1px solid rgba(248,81,73,.3); }
-  .composer { display: flex; gap: 8px; } .composer input { margin: 0; }
+  /* playground — terminal console */
+  .term { background: #0b0e13; border: 1px solid var(--stroke); border-radius: 10px; padding: 14px 16px; }
+  #playlog { height: 420px; overflow: auto; white-space: pre-wrap; word-break: break-word;
+    font-family: var(--mono); font-size: 13.5px; line-height: 1.65; margin-bottom: 12px; }
+  #playlog .pl-u { color: #7dffa8; }
+  #playlog .pl-a { color: var(--text); }
+  #playlog .pl-sys { color: var(--faint); }
+  #playlog .pl-err { color: var(--bad); }
+  .composer { display: flex; gap: 8px; align-items: center; }
+  .composer .prompt { font-family: var(--mono); font-weight: bold; color: #7dffa8; }
+  .composer input { margin: 0; font-family: var(--mono); }
   /* activity */
   #logfilter { max-width: 340px; }
   #logs div, #errlist div { border-bottom: 1px solid var(--stroke); padding: 5px 2px; font-family: var(--mono); font-size: 12.5px; }
@@ -156,15 +159,20 @@
   <!-- PLAYGROUND -->
   <section class="page" id="page-play">
     <h1 class="page-title">Playground</h1>
-    <p class="sub">Persistent streaming chat against the active model. History stays in this browser.</p>
+    <p class="sub">Terminal console against the active model — chat, or drive the host with /commands. History persists in this browser.</p>
     <div class="card">
-      <div id="playlog"></div>
-      <div class="composer">
-        <input id="playinput" placeholder="Message Ashat… (Enter to send)" autocomplete="off">
+      <div class="term">
+        <div id="playlog"></div>
+        <div class="composer">
+          <span class="prompt">❯</span>
+          <input id="playinput" placeholder="message Ashat, or /help for host commands…" autocomplete="off">
+        </div>
+      </div>
+      <div class="row" style="margin-top:12px">
         <button class="primary" id="btn-send">Send</button>
         <button class="ghost" id="btn-clear">Clear</button>
       </div>
-      <p class="hint" style="margin:8px 0 0">Streams tokens live via SSE · full history is sent each turn · /help lists host commands in the old console style.</p>
+      <p class="hint" style="margin:8px 0 0">Streams tokens live via SSE · full history is sent each turn · commands: /help /status /models /restart /shutdown /key generate|revoke /clear</p>
     </div>
   </section>
 
@@ -303,37 +311,73 @@ function logType(line) {
   if (/chat completions|discord test|request (started|completed)|status=(4\d\d|5\d\d)|Invalid API|Admin key/i.test(line)) return 'api';
   return 'engine';
 }
-/* ---------- playground: persistent + streaming ---------- */
+/* ---------- playground console: persistent history + streaming + host commands ---------- */
 let history = [];
 try { history = JSON.parse(localStorage.getItem('anh_history') || '[]'); } catch { history = []; }
+if (!Array.isArray(history)) history = [];
+function saveHistory() { try { localStorage.setItem('anh_history', JSON.stringify(history.slice(-50))); } catch {} }
+function termPrint(text, cls) {
+  const d = document.createElement('div');
+  d.className = 'pl-' + (cls || 'a');
+  d.textContent = text;
+  $('playlog').appendChild(d);
+  $('playlog').scrollTop = 99999;
+  return d;
+}
 function renderHistory() {
   $('playlog').innerHTML = '';
-  if (!history.length) {
-    const d = document.createElement('div'); d.className = 'msg sys';
-    d.textContent = 'No messages yet — say hello. History persists in this browser.';
-    $('playlog').appendChild(d); return;
-  }
-  for (const m of history) {
-    const d = document.createElement('div');
-    d.className = 'msg ' + (m.role === 'user' ? 'user' : 'assistant');
-    d.textContent = m.content;
-    $('playlog').appendChild(d);
-  }
-  $('playlog').scrollTop = 99999;
+  termPrint('Ashat console — chat here, or type /help for host commands.', 'sys');
+  for (const m of history) termPrint((m.role === 'user' ? '❯ ' : '') + m.content, m.role === 'user' ? 'u' : 'a');
 }
-function saveHistory() { try { localStorage.setItem('anh_history', JSON.stringify(history.slice(-50))); } catch {} }
+async function runCommand(raw) {
+  const [name, ...args] = raw.slice(1).trim().split(/\s+/);
+  try {
+    switch ((name || '').toLowerCase()) {
+      case 'help': return 'commands: /help /status /models /restart /shutdown /key generate|revoke /clear — or just chat.';
+      case 'clear': $('playlog').innerHTML = ''; return null;
+      case 'status': {
+        const j = await api('/api/status');
+        const e = j.engine || {};
+        return `host ok · engine ${e.up ? 'ONLINE' : 'offline'} · model ${e.model || '—'} · ${j.stats.requests} reqs · last ${j.stats.lastTps || '–'} tok/s`;
+      }
+      case 'models': {
+        const j = await api('/api/models');
+        return j.models.length ? j.models.map((f) => (f === j.current ? '● ' : '○ ') + f).join('\n') : 'no .gguf files in ./models';
+      }
+      case 'restart': {
+        termPrint('restarting engine…', 'sys');
+        const j = await api('/api/restart', { method: 'POST' });
+        refresh(true);
+        return j.error ? ('restart FAILED: ' + j.error) : (j.ok ? 'engine restart accepted.' : 'restart refused — engine not owned by this host.');
+      }
+      case 'shutdown': await api('/api/shutdown', { method: 'POST' }); refresh(true); return 'stop requested. host UI stays up.';
+      case 'key': {
+        const sub = (args[0] || '').toLowerCase();
+        if (sub === 'generate') {
+          const j = await api('/api/key/generate', { method: 'POST' });
+          refresh(true);
+          return j.apiKey ? `new key: ${j.apiKey}\n(copy now — shown once)` : ('failed: ' + (j.error || 'unknown'));
+        }
+        if (sub === 'revoke') { await api('/api/key/revoke', { method: 'POST' }); refresh(true); return 'key revoked — endpoint is open.'; }
+        return 'usage: /key generate|revoke';
+      }
+      default: return `unknown command /${name || ''} — type /help.`;
+    }
+  } catch (e) { return 'error: ' + e.message; }
+}
 async function sendPlay() {
   const inp = $('playinput'); const text = inp.value.trim();
   if (!text) return;
   inp.value = '';
-  if (text === '/clear') { history = []; saveHistory(); renderHistory(); return; }
   if (text.startsWith('/')) {
-    const d = document.createElement('div'); d.className = 'msg sys'; d.textContent = 'Commands: /clear — or just chat.';
-    $('playlog').appendChild(d); return;
+    if (text.trim() === '/clear') { history = []; saveHistory(); renderHistory(); return; }
+    const out = await runCommand(text);
+    if (out) termPrint(out, /^(error|unknown|.*FAILED|.*failed|.*refused)/i.test(out) ? 'err' : 'sys');
+    return;
   }
-  history.push({ role: 'user', content: text }); saveHistory(); renderHistory();
-  const bubble = document.createElement('div'); bubble.className = 'msg assistant'; bubble.textContent = '…';
-  $('playlog').appendChild(bubble); $('playlog').scrollTop = 99999;
+  history.push({ role: 'user', content: text }); saveHistory();
+  termPrint('❯ ' + text, 'u');
+  const line = termPrint('…', 'a');
   try {
     const r = await fetch('/api/chat', {
       method: 'POST', headers: { 'Content-Type': 'application/json', ...authHeaders() },
@@ -342,37 +386,36 @@ async function sendPlay() {
     const ct = r.headers.get('content-type') || '';
     if (!r.ok || !ct.includes('text/event-stream')) {
       const j = await r.json().catch(() => ({ error: 'request failed' }));
-      bubble.className = 'msg err'; bubble.textContent = j.error || ('HTTP ' + r.status);
+      line.className = 'pl-err'; line.textContent = j.error || ('HTTP ' + r.status);
       return;
     }
     const reader = r.body.getReader();
     const dec = new TextDecoder();
     let buf = '', full = '';
-    bubble.textContent = '';
+    line.textContent = '';
     while (true) {
       const { done, value } = await reader.read();
       if (done) break;
       buf += dec.decode(value, { stream: true });
       const parts = buf.split('\n\n'); buf = parts.pop();
       for (const p of parts) {
-        for (const line of p.split('\n')) {
-          const t = line.trim();
+        for (const pline of p.split('\n')) {
+          const t = pline.trim();
           if (!t.startsWith('data:')) continue;
           const data = t.slice(5).trim();
           if (data === '[DONE]') continue;
           try {
             const j = JSON.parse(data);
-            const delta = j.choices?.[0]?.delta?.content || '';
-            full += delta;
-            bubble.textContent = full || '…';
+            full += j.choices?.[0]?.delta?.content || '';
+            line.textContent = full || '…';
             $('playlog').scrollTop = 99999;
           } catch {}
         }
       }
     }
     history.push({ role: 'assistant', content: full || '(empty reply)' });
-    saveHistory(); renderHistory(); refresh(true);
-  } catch (e) { bubble.className = 'msg err'; bubble.textContent = 'error: ' + e.message; }
+    saveHistory(); refresh(true);
+  } catch (e) { line.className = 'pl-err'; line.textContent = 'error: ' + e.message; }
 }
 $('btn-send').onclick = sendPlay;
 $('playinput').addEventListener('keydown', (e) => { if (e.key === 'Enter') sendPlay(); });
