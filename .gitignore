@@ -1,0 +1,15 @@
+# GGUF weights are too big for git — download per models/README.md
+# runtime
+node_modules/
+*.log
+host/settings.json.migrated
+# OS / editor
+.DS_Store
+Thumbs.db
+.vscode/
+# local tool state
+.freebuff/
+# release staging (built by CI)
+dist/
+models/LFM2.5-2.6B-Q4_0.gguf
+models/LFM2.5-350M-Q4_0.gguf

@@ -1,0 +1,4 @@
+#!/bin/sh
+# Ashat engine alias (macOS / Linux) — forwards to the underlying engine binary.
+# Install the engine first (see README), then: ./ashat serve -f models/foo.gguf --cpu --port 1234
+exec mistralrs "$@"

@@ -1,0 +1,45 @@
+# Ashat Neural Host — THE settings file. Everything lives here.
+# Managed by the Host + Settings page (http://localhost:8787) — safe to edit by hand too.
+#
+# The 3-step workflow:
+#   1. Drop a .gguf model file into ./models   (auto-discovered, no config needed)
+#   2. Start AHN:  npm start
+#   3. Open the website:  http://localhost:8787  (port comes from [host] below)
+#
+# Engine: ashat-engine (Rust, CPU) · OpenAI-compatible model id on :8787/v1 is "ashat"
+
+[host]
+port = 8787            # website + /v1 proxy port (restart the Host to apply)
+
+[engine.context]
+size = 0            # 0 = engine default; caps the context window (--max-model-len)
+compact_enabled = true
+compact_strategy = "summarize"  # truncate | summarize — what to do when history exceeds the window
+compact_reserve = 512         # tokens kept free for the reply + safety margin
+
+[engine]
+port = 1234            # engine port (Dashboard Restart applies this)
+model = "LFM2.5-2.6B-Q4_0.gguf"  # active GGUF in ./models (Settings page switches this)
+device = "cpu"         # cpu-only for now
+
+[auth]
+api_key = ""           # empty = open; generate one on the dashboard ("sk-...")
+
+[persona]
+name = "Ashat"          # how the AI identifies itself
+system_prompt = "You are Ashat, a helpful AI assistant running locally on Ashat Neural Host. Always identify yourself as Ashat."
+
+[discord]
+enabled = false
+token = ""             # bot token (never shown back — paste to replace)
+client_id = ""
+guild_id = ""
+prefix = "!"
+model = ""            # empty = same as main (shares its engine); else a second engine boots on [discord] port
+port = 1235            # second-engine port (only when discord uses its own model)
+
+[discord.context]
+size = 0            # 0 = engine default; own window for the bot's engine
+compact_enabled = false
+compact_strategy = "truncate"
+compact_reserve = 512

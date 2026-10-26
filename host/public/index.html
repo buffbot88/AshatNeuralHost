@@ -1,0 +1,493 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Ashat Neural Host</title>
+<style>
+  :root {
+    --bg1: #0b1026; --bg2: #141b3d; --accent: #7c6cff; --accent2: #38e1ff;
+    --glass: rgba(255,255,255,.07); --stroke: rgba(255,255,255,.14);
+    --text: #eef1ff; --dim: #9aa3c7; --good: #3ddc84; --bad: #ff5d5d; --warn: #ffb454;
+    --term-green: #7dffa8; --term-dim: #5f6b8a;
+  }
+  * { box-sizing: border-box; font-family: "Segoe UI", system-ui, sans-serif; }
+  body { margin: 0; color: var(--text); min-height: 100vh; display: flex; flex-direction: column;
+    background: radial-gradient(1200px 600px at 15% -5%, #2b2f7a 0%, transparent 60%),
+                radial-gradient(1000px 500px at 90% 10%, #0e5a6e 0%, transparent 55%),
+                linear-gradient(160deg, var(--bg1), var(--bg2)); }
+  header { display: flex; align-items: center; gap: 14px; padding: 18px 28px; }
+  .logo { width: 42px; height: 42px; border-radius: 14px;
+    background: linear-gradient(135deg, var(--accent), var(--accent2));
+    display: grid; place-items: center; font-size: 22px; box-shadow: 0 8px 30px rgba(124,108,255,.45); }
+  h1 { font-size: 20px; margin: 0; letter-spacing: .4px; }
+  header small { color: var(--dim); }
+  nav { display: flex; gap: 8px; margin-left: auto; }
+  nav button { background: var(--glass); border: 1px solid var(--stroke); color: var(--text);
+    padding: 9px 18px; border-radius: 12px; cursor: pointer; backdrop-filter: blur(12px); }
+  nav button.active, nav button:hover { background: rgba(124,108,255,.25); border-color: var(--accent); }
+  main { display: grid; grid-template-columns: 1.2fr .8fr; gap: 18px; padding: 6px 28px 40px; max-width: 1200px; margin: 0 auto; width: 100%; flex: 1; }
+  .card { background: var(--glass); border: 1px solid var(--stroke); border-radius: 20px;
+    padding: 20px 22px; backdrop-filter: blur(18px); box-shadow: 0 12px 40px rgba(0,0,0,.35); }
+  .card h2 { margin: 0 0 12px; font-size: 15px; text-transform: uppercase; letter-spacing: 1.2px; color: var(--dim); }
+  .tiles { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin-bottom: 18px; }
+  .tile { background: var(--glass); border: 1px solid var(--stroke); border-radius: 16px;
+    padding: 14px 16px; backdrop-filter: blur(18px); }
+  .tile span { color: var(--dim); font-size: 11.5px; text-transform: uppercase; letter-spacing: 1px; }
+  .tile b { font-size: 24px; display: block; margin-top: 4px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  #s-model { font-size: 15px; line-height: 1.5; }
+  .spark-wrap { position: relative; }
+  #spark-empty { position: absolute; inset: 0; display: grid; place-items: center;
+    color: var(--dim); font-size: 12.5px; pointer-events: none; }
+  .tile small { color: var(--dim); font-size: 11.5px; }
+  .big { font-size: 46px; font-weight: 700; }
+  .unit { font-size: 15px; color: var(--dim); font-weight: 400; }
+  .row { display: flex; gap: 12px; flex-wrap: wrap; align-items: center; }
+  .stat { flex: 1; min-width: 120px; background: rgba(255,255,255,.04); border: 1px solid var(--stroke);
+    border-radius: 14px; padding: 12px 14px; }
+  .stat b { font-size: 22px; display: block; }
+  .stat span { color: var(--dim); font-size: 12px; }
+  .dot { width: 10px; height: 10px; border-radius: 50%; display: inline-block; margin-right: 8px; }
+  .on { background: var(--good); box-shadow: 0 0 12px var(--good); }
+  .off { background: var(--bad); box-shadow: 0 0 12px var(--bad); }
+  button.primary { background: linear-gradient(135deg, var(--accent), var(--accent2)); border: none;
+    color: #0b1026; font-weight: 700; padding: 10px 20px; border-radius: 12px; cursor: pointer; }
+  button.ghost { background: rgba(255,255,255,.06); border: 1px solid var(--stroke); color: var(--text);
+    padding: 10px 18px; border-radius: 12px; cursor: pointer; }
+  button.danger { background: rgba(255,93,93,.15); border: 1px solid var(--bad); color: #ffb3b3;
+    padding: 10px 18px; border-radius: 12px; cursor: pointer; }
+  button:disabled { opacity: .5; cursor: wait; }
+  canvas { width: 100%; height: 110px; background: rgba(0,0,0,.25); border-radius: 12px; border: 1px solid var(--stroke); }
+  #errors, #logs { max-height: 220px; overflow: auto; font-size: 12.5px; }
+  #errors div { background: rgba(255,93,93,.1); border: 1px solid rgba(255,93,93,.3);
+    padding: 8px 10px; border-radius: 10px; margin-bottom: 8px; }
+  #errors .t, #logs .t { color: var(--dim); font-size: 11px; }
+  #logs div { border-bottom: 1px solid rgba(255,255,255,.06); padding: 4px 2px; font-family: Consolas, monospace; }
+  .ok-text { color: var(--good); } .empty { color: var(--dim); }
+  input, select, textarea { background: rgba(0,0,0,.35); border: 1px solid var(--stroke); color: var(--text);
+    padding: 10px 12px; border-radius: 10px; width: 100%; margin: 6px 0 12px; }
+  textarea { resize: vertical; font-size: 13px; line-height: 1.5; }
+  label { font-size: 12.5px; color: var(--dim); }
+  .page { display: none; } .page.active { display: contents; }
+  /* terminal chat */
+  .term { background: rgba(2,6,16,.85); border: 1px solid var(--stroke); border-radius: 14px;
+    padding: 14px 16px; font-family: Consolas, "Cascadia Code", monospace; font-size: 13.5px; line-height: 1.65; }
+  #chatlog { height: 320px; overflow: auto; white-space: pre-wrap; word-break: break-word; }
+  #chatlog .u { color: var(--term-green); }
+  #chatlog .a { color: var(--text); }
+  #chatlog .sys { color: var(--term-dim); }
+  #chatlog .err { color: var(--bad); }
+  .term-input { display: flex; align-items: center; gap: 8px; margin-top: 10px; }
+  .term-input span { color: var(--term-green); font-family: Consolas, monospace; font-weight: bold; }
+  .term-input input { margin: 0; font-family: Consolas, monospace; background: transparent; border: none;
+    border-bottom: 1px solid var(--stroke); border-radius: 0; padding: 8px 2px; }
+  .term-input input:focus { outline: none; border-bottom-color: var(--term-green); }
+  /* settings sub-tabs */
+  .subnav { display: flex; gap: 8px; margin-bottom: 16px; flex-wrap: wrap; }
+  .subnav button { background: rgba(255,255,255,.05); border: 1px solid var(--stroke); color: var(--dim);
+    padding: 8px 16px; border-radius: 10px; cursor: pointer; font-size: 13px; }
+  .subnav button.active { color: var(--text); background: rgba(124,108,255,.25); border-color: var(--accent); }
+  .subset { display: none; } .subset.active { display: block; }
+  .keybox { font-family: Consolas, monospace; background: rgba(0,0,0,.4); padding: 10px; border-radius: 10px;
+    word-break: break-all; border: 1px dashed var(--accent); margin: 8px 0; font-size: 12.5px; }
+  .switch { display: flex; align-items: center; gap: 10px; margin: 6px 0 12px; }
+  .hint { color: var(--dim); font-size: 12.5px; margin: -6px 0 12px; }
+  footer { text-align: center; color: var(--dim); font-size: 12.5px; padding: 18px; border-top: 1px solid rgba(255,255,255,.08); }
+  footer a { color: var(--accent2); text-decoration: none; }
+  @media (max-width: 900px) { main { grid-template-columns: 1fr; } .tiles { grid-template-columns: repeat(2, 1fr); } }
+</style>
+</head>
+<body>
+<header>
+  <div class="logo">🧠</div>
+  <div><h1>Ashat Neural Host</h1><small>Local GGUF inference control plane</small></div>
+  <nav>
+    <button data-page="dash" class="active">Dashboard</button>
+    <button data-page="chat">Console</button>
+    <button data-page="settings">Settings</button>
+  </nav>
+</header>
+<main>
+  <!-- DASHBOARD -->
+  <section class="page active" id="page-dash" style="display:contents">
+    <div style="display:contents">
+      <div>
+        <div class="card" id="no-models" style="display:none;margin-bottom:18px;border-color:var(--warn)">
+          <h2>📥 No models yet</h2>
+          <div style="color:var(--dim);font-size:13.5px">Drop any <b style="color:var(--text)">.gguf</b> file into the <b style="color:var(--text)">models</b> folder — it appears automatically, no restart or config edit needed.</div>
+        </div>
+        <div class="tiles">
+          <div class="tile"><span>Status</span><b id="statustext">Checking…</b><small><span id="statusdot" class="dot off"></span><span id="s-uptime">—</span></small></div>
+          <div class="tile"><span>Model</span><b id="s-model">–</b><small id="s-modelsize">—</small></div>
+          <div class="tile"><span>Throughput</span><b><span id="tps">–</span> <small class="unit">tok/s</small></b><small>avg <span id="s-avg">–</span> tok/s</small></div>
+          <div class="tile"><span>Work done</span><b id="s-req">–</b><small><span id="s-tok">–</span> tokens total</small></div>
+        </div>
+        <div class="card">
+          <h2>Throughput</h2>
+          <div class="spark-wrap"><canvas id="spark" width="600" height="110"></canvas><div id="spark-empty">awaiting first request — send a chat to see throughput</div></div>
+          <div class="row" style="margin-top:14px">
+            <button class="primary" id="btn-restart">↻ Restart engine</button>
+            <button class="danger" id="btn-shutdown">⏻ Shutdown engine</button>
+            <small style="color:var(--dim)">port <span id="s-port">–</span></small>
+          </div>
+          <div style="margin-top:8px"><small style="color:var(--dim)">discord: <span id="s-discordeng">—</span></small></div>
+        </div>
+        <div class="card" style="margin-top:18px" id="errors-card" hidden>
+          <h2>⚠ Errors</h2>
+          <div id="errors"></div>
+        </div>
+      </div>
+      <div>
+        <div class="card">
+          <h2>OpenAI endpoint</h2>
+          <p style="color:var(--dim);font-size:13px;margin:0 0 8px">Base URL: <b style="color:var(--text)">http://localhost:8787/v1</b> (model <b style="color:var(--text)">ashat</b>)<br>
+          Engine native: <b style="color:var(--text)">http://localhost:1234/v1</b><br>
+          Keys: <span id="keystate">—</span></p>
+          <div class="row"><button class="ghost" id="btn-go-access">Manage keys →</button></div>
+        </div>
+        <div class="card" style="margin-top:18px">
+          <h2>Engine logs (tail)</h2>
+          <div id="logs"><div class="empty">Waiting for logs…</div></div>
+        </div>
+      </div>
+    </div>
+  </section>
+  <!-- CONSOLE / TERMINAL CHAT -->
+  <section class="page" id="page-chat">
+    <div style="display:contents">
+      <div class="card" style="grid-column: 1 / -1">
+        <h2>Ashat console — chat + host commands (type /help)</h2>
+        <div class="term">
+          <div id="chatlog"></div>
+          <div class="term-input"><span>❯</span><input id="chatinput" placeholder="message Ashat, or /command…" autocomplete="off"></div>
+        </div>
+      </div>
+    </div>
+  </section>
+  <!-- SETTINGS -->
+  <section class="page" id="page-settings">
+    <div style="display:contents">
+      <div class="card" style="grid-column: 1 / -1">
+        <h2>Settings <small style="text-transform:none;letter-spacing:0">— everything saves to config.toml</small></h2>
+        <div class="subnav">
+          <button data-sub="general" class="active">General</button>
+          <button data-sub="persona">Persona</button>
+          <button data-sub="discord">Discord</button>
+          <button data-sub="access">Access</button>
+        </div>
+        <div class="subset active" id="set-general">
+          <label>Active model — any GGUF in ./models (LFM2.5 Q4_0 recommended for CPU)</label>
+          <select id="modelsel"></select>
+          <div class="hint" id="modelhint">Drop a file in, it shows up here automatically.</div>
+          <div class="row">
+            <button class="primary" id="btn-model">Switch model + restart</button>
+            <button class="ghost" id="btn-models-refresh">Refresh list</button>
+          </div>
+          <label style="margin-top:14px;display:block">Engine port (Dashboard Restart applies)</label>
+          <input id="inp-port" type="number" min="1" max="65535">
+        <label style="margin-top:6px;display:block">Website port — this site (Host restart applies)</label>
+        <input id="inp-hport" type="number" min="1" max="65535">
+        <label style="margin-top:6px;display:block">Context size — max tokens per request (0 = engine default)</label>
+        <input id="inp-ctx" type="number" min="0">
+        <div class="switch"><input type="checkbox" id="inp-compact" style="width:auto"><label for="inp-compact">Auto-compact history when it exceeds the window</label></div>
+        <label>Compaction strategy</label>
+        <select id="inp-compact-strategy"><option value="truncate">truncate oldest</option><option value="summarize">summarize with the engine</option></select>
+        <label>Reserve tokens (reply + margin)</label>
+        <input id="inp-compact-reserve" type="number" min="0">
+        <div class="row">
+            <button class="ghost" id="btn-save-general">Save general</button>
+            <span id="save-msg" style="color:var(--good);font-size:12.5px"></span>
+          </div>
+        </div>
+        <div class="subset" id="set-persona">
+          <label>Name (how the AI identifies)</label>
+          <input id="p-name" placeholder="Ashat" maxlength="40">
+          <label>System prompt (identity + behavior, sent when a chat has no system message)</label>
+          <textarea id="p-prompt" rows="4"></textarea>
+          <div class="row">
+            <button class="ghost" id="btn-persona-save">Save persona</button>
+            <span id="persona-msg" style="color:var(--good);font-size:12.5px"></span>
+          </div>
+        </div>
+        <div class="subset" id="set-discord">
+          <div class="switch"><input type="checkbox" id="d-enabled" style="width:auto"><label for="d-enabled">Enabled</label></div>
+          <label>Bot token</label>
+          <input id="d-token" type="password" placeholder="Paste new token to replace (stored locally)">
+          <label>Client / application ID</label>
+          <input id="d-client" placeholder="optional">
+          <label>Guild ID</label>
+          <input id="d-guild" placeholder="optional">
+        <label>Command prefix</label>
+        <input id="d-prefix" placeholder="!">
+        <label>Model for the bot — empty = same as main (shares its engine)</label>
+        <select id="d-model"></select>
+        <div class="hint">A different model boots a second engine on the port below (extra RAM).</div>
+        <label>Second-engine port</label>
+        <input id="d-port" type="number" min="1" max="65535">
+        <label>Context size (0 = engine default)</label>
+        <input id="d-ctx" type="number" min="0">
+        <div class="switch"><input type="checkbox" id="d-compact" style="width:auto"><label for="d-compact">Auto-compact bot history</label></div>
+        <label>Compaction strategy</label>
+        <select id="d-compact-strategy"><option value="truncate">truncate oldest</option><option value="summarize">summarize</option></select>
+        <label>Reserve tokens</label>
+        <input id="d-compact-reserve" type="number" min="0">
+        <div class="row">
+            <button class="ghost" id="btn-discord-save">Save Discord</button>
+            <button class="ghost" id="btn-discord-test">Test token</button>
+          </div>
+          <div id="discord-msg" style="font-size:13px;margin-top:8px"></div>
+          <p class="hint" style="margin-top:10px">Tip: the Console tab also accepts <b>/discord on|off|test</b> — drive the bot config without leaving the terminal.</p>
+        </div>
+        <div class="subset" id="set-access">
+          <p style="color:var(--dim);font-size:13px;margin-top:0">Keys gate <b style="color:var(--text)">/v1/*</b> as <span style="font-family:Consolas">Authorization: Bearer &lt;key&gt;</span>. No key = endpoint is open.</p>
+          <div class="keybox" id="keypreview">No API key set — endpoint is open.</div>
+          <div class="row">
+            <button class="ghost" id="btn-key">Generate API key</button>
+            <button class="ghost" id="btn-keyrevoke">Revoke</button>
+          </div>
+          <div class="keybox" id="keynew" style="display:none"></div>
+        </div>
+      </div>
+    </div>
+  </section>
+</main>
+<footer>© 2026 <a href="https://www.agpstudios.org">AGP Studios, inc</a> · Ashat Neural Host v1 · local inference, your hardware, your data.</footer>
+<script>
+const $ = (id) => document.getElementById(id);
+function showPage(name, sub) {
+  document.querySelectorAll('nav button').forEach((x) => x.classList.toggle('active', x.dataset.page === name));
+  document.querySelectorAll('section.page').forEach((p) => p.style.display = 'none');
+  $('page-' + name).style.display = 'contents';
+  if (sub) showSub(sub);
+}
+function showSub(sub) {
+  document.querySelectorAll('.subnav button').forEach((x) => x.classList.toggle('active', x.dataset.sub === sub));
+  document.querySelectorAll('.subset').forEach((p) => p.classList.toggle('active', p.id === 'set-' + sub));
+}
+document.querySelectorAll('nav button').forEach((b) => b.onclick = () => showPage(b.dataset.page));
+document.querySelectorAll('.subnav button').forEach((b) => b.onclick = () => showSub(b.dataset.sub));
+$('btn-go-access').onclick = () => showPage('settings', 'access');
+async function api(path, opts) {
+  const r = await fetch(path, { headers: { 'Content-Type': 'application/json' }, ...opts });
+  return r.json();
+}
+function fmtBytes(n) {
+  if (!n && n !== 0) return '—';
+  const u = ['B', 'KB', 'MB', 'GB'];
+  let i = 0; while (n >= 1024 && i < u.length - 1) { n /= 1024; i++; }
+  return n.toFixed(n >= 100 ? 0 : 1) + ' ' + u[i];
+}
+function fmtUptime(ms) {
+  if (!ms || ms < 0) return '—';
+  const s = Math.floor(ms / 1000), h = Math.floor(s / 3600), m = Math.floor(s % 3600 / 60);
+  return h ? `${h}h ${m}m` : m ? `${m}m ${s % 60}s` : `${s}s`;
+}
+function drawSpark(samples) {
+  const c = $('spark'), ctx = c.getContext('2d');
+  ctx.clearRect(0, 0, c.width, c.height);
+  if (!samples.length) return;
+  const max = Math.max(...samples.map((s) => s.tps), 5);
+  const pts = samples.map((s, i) => [
+    (i / Math.max(samples.length - 1, 1)) * (c.width - 10) + 5,
+    c.height - 8 - (s.tps / max) * (c.height - 20),
+  ]);
+  const grad = ctx.createLinearGradient(0, 0, 0, c.height);
+  grad.addColorStop(0, 'rgba(124,108,255,.45)');
+  grad.addColorStop(1, 'rgba(124,108,255,.02)');
+  ctx.beginPath();
+  pts.forEach(([x, y], i) => i ? ctx.lineTo(x, y) : ctx.moveTo(x, y));
+  ctx.strokeStyle = '#8f7fff'; ctx.lineWidth = 2.5; ctx.lineJoin = 'round'; ctx.stroke();
+  ctx.lineTo(pts[pts.length - 1][0], c.height); ctx.lineTo(pts[0][0], c.height); ctx.closePath();
+  ctx.fillStyle = grad; ctx.fill();
+}
+function esc(s) { return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;'); }
+function termPrint(text, cls) {
+  const d = document.createElement('div');
+  d.className = cls || 'a';
+  d.innerHTML = esc(text);
+  $('chatlog').appendChild(d);
+  $('chatlog').scrollTop = 99999;
+}
+async function refresh() {
+  try {
+    const [status, m, mm, s] = await Promise.all([api('/api/status'), api('/api/metrics'), api('/api/models'), api('/api/settings')]);
+    const eng = status.engine || status.mistral || {};
+    $('statusdot').className = 'dot ' + (eng.up ? 'on' : 'off');
+    $('statustext').textContent = eng.up ? 'Online' : 'Offline';
+    $('s-uptime').textContent = eng.up && eng.startedAt ? 'up ' + fmtUptime(Date.now() - new Date(eng.startedAt).getTime()) : 'engine ' + (eng.up ? 'starting…' : 'offline');
+    $('tps').textContent = status.stats.lastTps ? status.stats.lastTps : '0.0';
+    $('s-avg').textContent = status.stats.avgTps ? status.stats.avgTps : '0.0';
+    $('spark-empty').style.display = (m.samples && m.samples.length) ? 'none' : '';
+    $('s-req').textContent = status.stats.requests;
+    $('s-tok').textContent = status.stats.totalTokens;
+    $('s-model').textContent = eng.model || '–';
+    $('s-modelsize').textContent = mm.sizes && mm.sizes[eng.model] ? fmtBytes(mm.sizes[eng.model]) + ' · port ' + eng.port : 'port ' + (eng.port || '–');
+    $('s-port').textContent = eng.port || '–';
+    drawSpark(m.samples || []);
+    const hasErrors = !!(m.errors && m.errors.length);
+    $('errors-card').hidden = !hasErrors;
+    if (hasErrors) {
+      $('errors').innerHTML = m.errors.map((e) => `<div><div class="t">${e.t}</div>${esc(e.msg)}</div>`).join('');
+    }
+    $('logs').innerHTML = (m.logs && m.logs.length)
+      ? m.logs.slice().reverse().map((l) => `<div><span class="t">${l.t.slice(11, 19)}</span> ${esc(l.line)}</div>`).join('')
+      : '<div class="empty">Waiting for logs…</div>';
+    $('keypreview').textContent = s.apiKeySet ? `Key set: ${s.apiKeyPreview} — send as "Authorization: Bearer <key>"` : 'No API key set — endpoint is open.';
+    $('keystate').textContent = s.apiKeySet ? 'protected (' + s.apiKeyPreview + ')' : 'open (no key)';
+    if (!$('inp-port').value) $('inp-port').value = s.enginePort;
+    if (!$('inp-hport').value) $('inp-hport').value = s.hostPort || 8787;
+    if (!$('inp-ctx').value && s.engineContext !== undefined) $('inp-ctx').value = s.engineContext;
+    $('inp-compact').checked = !!s.compactEnabled;
+    if (s.compactStrategy) $('inp-compact-strategy').value = s.compactStrategy;
+    if (!$('inp-compact-reserve').value && s.compactReserve !== undefined) $('inp-compact-reserve').value = s.compactReserve;
+    if (s.discord) {
+      $('d-enabled').checked = !!s.discord.enabled;
+      if (s.discord.clientId) $('d-client').value = s.discord.clientId;
+      if (s.discord.guildId) $('d-guild').value = s.discord.guildId;
+      if (s.discord.prefix) $('d-prefix').value = s.discord.prefix;
+      if (!$('d-port').value) $('d-port').value = s.discord.port || 1235;
+      if (!$('d-ctx').value && s.discord.context !== undefined) $('d-ctx').value = s.discord.context;
+      $('d-compact').checked = !!s.discord.compactEnabled;
+      if (s.discord.compactStrategy) $('d-compact-strategy').value = s.discord.compactStrategy;
+      if (!$('d-compact-reserve').value && s.discord.compactReserve !== undefined) $('d-compact-reserve').value = s.discord.compactReserve;
+    }
+    const de = status.discordEngine;
+    if (de) $('s-discordeng').textContent = !de.wanted ? 'not configured' : de.shared ? `shares main engine (${de.model})` : (de.up ? `own engine online :${de.port} (${de.model})` : 'own engine offline');
+    if (s.persona) {
+      if (!$('p-name').value) $('p-name').value = s.persona.name || 'Ashat';
+      if (!$('p-prompt').value) $('p-prompt').value = s.persona.systemPrompt || '';
+    }
+    const sig = mm.models.join('|') + '|' + mm.current;      if (sig !== window._modelsig && document.activeElement !== $('modelsel') && document.activeElement !== $('d-model')) {
+        window._modelsig = sig;
+        $('modelsel').innerHTML = mm.models.map((f) => `<option value="${esc(f)}" ${f === mm.current ? 'selected' : ''}>${esc(f)}${mm.sizes && mm.sizes[f] ? ' (' + fmtBytes(mm.sizes[f]) + ')' : ''}</option>`).join('') || '<option>— drop a .gguf in ./models —</option>';
+        const dcur = window._dmodel || (s.discord && s.discord.model) || '';
+        $('d-model').innerHTML = `<option value="">Same as main (shares engine)</option>` + mm.models.map((f) => `<option value="${esc(f)}" ${f === dcur ? 'selected' : ''}>${esc(f)}${mm.sizes && mm.sizes[f] ? ' (' + fmtBytes(mm.sizes[f]) + ')' : ''}</option>`).join('');
+      $('modelhint').textContent = mm.models.length ? `${mm.models.length} model${mm.models.length > 1 ? 's' : ''} discovered — any GGUF works.` : 'Drop a file in, it shows up here automatically.';
+    }
+    $('no-models').style.display = mm.models.length ? 'none' : '';
+  } catch (e) { $('statustext').textContent = 'Host unreachable'; }
+}
+/* console slash-commands: drive the host (incl. Discord) without leaving the terminal */
+const COMMANDS = {
+  help: 'commands: /help /status /models /restart /shutdown /discord on|off|test /key generate|revoke /clear — or just chat.',
+  clear: null, status: null, models: null, restart: null, shutdown: null, discord: null, key: null,
+};
+async function runCommand(raw) {
+  const [name, ...args] = raw.slice(1).trim().split(/\s+/);
+  try {
+    switch ((name || '').toLowerCase()) {
+      case 'help': return COMMANDS.help;
+      case 'clear': $('chatlog').innerHTML = ''; return null;
+      case 'status': {
+        const j = await api('/api/status');
+        const e = j.engine || {};
+        return `host ok · engine ${e.up ? 'ONLINE' : 'offline'} · model ${e.model || '—'} · ${j.stats.requests} reqs · last ${j.stats.lastTps || '–'} tok/s`;
+      }
+      case 'models': {
+        const j = await api('/api/models');
+        return j.models.length ? j.models.map((f) => (f === j.current ? '● ' : '○ ') + f).join('\n') : 'no .gguf files in ./models';
+      }
+      case 'restart': {
+        termPrint('restarting engine…', 'sys');
+        const j = await api('/api/restart', { method: 'POST' });
+        refresh();
+        return j.ok ? 'engine back online.' : 'restart FAILED — see dashboard errors.';
+      }
+      case 'shutdown': await api('/api/shutdown', { method: 'POST' }); refresh(); return 'engine stopped. host UI stays up.';
+      case 'discord': {
+        const sub = (args[0] || '').toLowerCase();
+        if (sub === 'on' || sub === 'off') {
+          await api('/api/settings', { method: 'POST', body: JSON.stringify({ discord: { enabled: sub === 'on' } }) });
+          return `discord bot ${sub === 'on' ? 'ENABLED' : 'disabled'} (saved to config.toml).`;
+        }
+        if (sub === 'test') {
+          const j = await api('/api/discord/test', { method: 'POST' });
+          return j.ok ? `connected as ${j.bot.username} (${j.bot.id}).` : `test failed: ${j.error}`;
+        }
+        return 'usage: /discord on|off|test';
+      }
+      case 'key': {
+        const sub = (args[0] || '').toLowerCase();
+        if (sub === 'generate') {
+          const j = await api('/api/key/generate', { method: 'POST' });
+          refresh();
+          return `new key: ${j.apiKey}\n(copy now — shown once)`;
+        }
+        if (sub === 'revoke') { await api('/api/key/revoke', { method: 'POST' }); refresh(); return 'key revoked — endpoint is open.'; }
+        return 'usage: /key generate|revoke';
+      }
+      default: return `unknown command /${name || ''} — ${COMMANDS.help}`;
+    }
+  } catch (e) { return 'error: ' + e.message; }
+}
+async function sendChat() {
+  const inp = $('chatinput'); if (!inp.value.trim()) return;
+  const text = inp.value; inp.value = '';
+  termPrint('❯ ' + text, 'u');
+  if (text.startsWith('/')) {
+    const out = await runCommand(text);
+    if (out) termPrint(out, out.startsWith('error') || out.startsWith('unknown') || out.includes('FAILED') || out.includes('failed') ? 'err' : 'sys');
+    return;
+  }
+  termPrint('…', 'sys');
+  const typing = $('chatlog').lastChild;
+  const j = await api('/api/chat', { method: 'POST', body: JSON.stringify({ messages: [{ role: 'user', content: text }] }) });
+  typing.remove();
+  termPrint(j.choices?.[0]?.message?.content || j.error || 'request failed — see Errors on dashboard.', j.error ? 'err' : 'a');
+  refresh();
+}
+$('chatinput').addEventListener('keydown', (e) => { if (e.key === 'Enter') sendChat(); });
+$('btn-restart').onclick = async (e) => {
+  e.target.disabled = true; e.target.textContent = 'Restarting… (may take ~30s)';
+  await api('/api/restart', { method: 'POST' }); await refresh();
+  e.target.disabled = false; e.target.textContent = '↻ Restart engine';
+};
+$('btn-shutdown').onclick = async () => { if (confirm('Stop the inference engine? Host UI stays up.')) { await api('/api/shutdown', { method: 'POST' }); refresh(); } };
+$('btn-key').onclick = async () => {
+  const j = await api('/api/key/generate', { method: 'POST' });
+  $('keynew').style.display = 'block'; $('keynew').textContent = j.apiKey; refresh();
+};
+$('btn-keyrevoke').onclick = async () => { await api('/api/key/revoke', { method: 'POST' }); $('keynew').style.display = 'none'; refresh(); };
+$('btn-models-refresh').onclick = async () => {
+  const j = await api('/api/models');
+  window._modelsig = j.models.join('|') + '|' + j.current;
+  $('modelsel').innerHTML = j.models.map((f) => `<option value="${esc(f)}" ${f === j.current ? 'selected' : ''}>${esc(f)}${j.sizes && j.sizes[f] ? ' (' + fmtBytes(j.sizes[f]) + ')' : ''}</option>`).join('') || '<option>— drop a .gguf in ./models —</option>';
+  const ddcur = window._dmodel || '';
+  window._dmodel = ddcur;
+  $('d-model').innerHTML = `<option value="">Same as main (shares engine)</option>` + j.models.map((f) => `<option value="${esc(f)}" ${f === ddcur ? 'selected' : ''}>${esc(f)}${j.sizes && j.sizes[f] ? ' (' + fmtBytes(j.sizes[f]) + ')' : ''}</option>`).join('');
+  refresh();
+};
+$('btn-model').onclick = async (e) => {
+  e.target.disabled = true; e.target.textContent = 'Switching…';
+  const j = await api('/api/model/select', { method: 'POST', body: JSON.stringify({ file: $('modelsel').value }) });
+  alert(j.ok ? `Switched to ${j.current}` : `Failed: ${j.error || 'see errors'}`);
+  e.target.disabled = false; e.target.textContent = 'Switch model + restart'; refresh();
+};
+$('btn-save-general').onclick = async () => {
+  const sj = await api('/api/settings', { method: 'POST', body: JSON.stringify({ enginePort: Number($('inp-port').value), hostPort: Number($('inp-hport').value), engineContext: Number($('inp-ctx').value || 0), compactEnabled: $('inp-compact').checked, compactStrategy: $('inp-compact-strategy').value, compactReserve: Number($('inp-compact-reserve').value || 0) }) });
+  $('save-msg').textContent = sj.hostRestart ? 'Saved to config.toml — restart the Host process for the new website port.' : 'Saved to config.toml — Dashboard Restart applies the engine port.';
+  setTimeout(() => $('save-msg').textContent = '', 4000); refresh();
+};
+$('btn-persona-save').onclick = async () => {
+  await api('/api/settings', { method: 'POST', body: JSON.stringify({ persona: { name: $('p-name').value, systemPrompt: $('p-prompt').value } }) });
+  $('persona-msg').textContent = 'Saved to config.toml — applies to new chats immediately.';
+  setTimeout(() => $('persona-msg').textContent = '', 4000);
+};
+$('btn-discord-save').onclick = async () => {
+  window._dmodel = $('d-model').value;
+  const body = { discord: { enabled: $('d-enabled').checked, token: $('d-token').value, clientId: $('d-client').value, guildId: $('d-guild').value, prefix: $('d-prefix').value, model: $('d-model').value, port: Number($('d-port').value || 1235), context: Number($('d-ctx').value || 0), compactEnabled: $('d-compact').checked, compactStrategy: $('d-compact-strategy').value, compactReserve: Number($('d-compact-reserve').value || 0) } };
+  if (!body.discord.token) delete body.discord.token;
+  await api('/api/settings', { method: 'POST', body: JSON.stringify(body) });
+  $('d-token').value = '';
+  $('discord-msg').innerHTML = '<span class="ok-text">Discord settings saved.</span>';
+};
+$('btn-discord-test').onclick = async () => {
+  $('discord-msg').textContent = 'Testing…';
+  const j = await api('/api/discord/test', { method: 'POST' });
+  $('discord-msg').innerHTML = j.ok ? `<span class="ok-text">✓ Connected as ${j.bot.username} (${j.bot.id})</span>` : `<span style="color:var(--bad)">✗ ${j.error}</span>`;
+};
+termPrint('Ashat console v1 — chat here, or type /help for host commands.', 'sys');
+refresh(); setInterval(refresh, 5000);
+</script>
+</body>
+</html>
