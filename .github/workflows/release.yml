@@ -33,6 +33,7 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
+          set -euo pipefail
           VER=$(node -p "require('./package.json').version")
           TAG="v$VER"
           if gh release view "$TAG" >/dev/null 2>&1; then
@@ -40,17 +41,28 @@ jobs:
             exit 0
           fi
           STAGE="dist/stage"
+          rm -rf dist
           mkdir -p "$STAGE"
-          cp -r host config.toml package.json README.md LICENSE ashat ashat.cmd "$STAGE/"
+          # Ship the example config as the starter config (never a live config.toml with secrets).
+          cp -r host package.json README.md LICENSE ashat ashat.cmd "$STAGE/"
+          cp config.example.toml "$STAGE/config.toml"
           mkdir -p "$STAGE/models"
           cp models/README.md "$STAGE/models/"
-          test ! -f "$STAGE/models/"*.gguf  # never ship weights
-          cd dist
-          TAG="$TAG" python3 -c "import os, shutil; t = os.environ['TAG']; shutil.make_archive(f'ashat-neural-host-{t}', 'gztar', root_dir='stage', base_dir='.'); shutil.make_archive(f'ashat-neural-host-{t}', 'zip', root_dir='stage', base_dir='.')"
+          if ls "$STAGE/models/"*.gguf >/dev/null 2>&1; then
+            echo "Refusing: weights would ship in the release" >&2
+            exit 1
+          fi
+          (cd "$STAGE" && python3 -c "import shutil; shutil.make_archive('../ashat-neural-host-${TAG}', 'gztar', root_dir='.', base_dir='.'); shutil.make_archive('../ashat-neural-host-${TAG}', 'zip', root_dir='.', base_dir='.')" )
+          ls -la dist/
+          test -f "dist/ashat-neural-host-${TAG}.tar.gz"
+          test -f "dist/ashat-neural-host-${TAG}.zip"
+          tar tzf "dist/ashat-neural-host-${TAG}.tar.gz" | head -20
+          unzip -l "dist/ashat-neural-host-${TAG}.zip" | head -30
+          # Archives validated — only now is it safe to tag.
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git tag -a "$TAG" -m "Ashat Neural Host $TAG"
           git push origin "$TAG"
-          gh release create "$TAG" dist/*.tar.gz dist/*.zip \
+          gh release create "$TAG" "dist/ashat-neural-host-${TAG}.tar.gz" "dist/ashat-neural-host-${TAG}.zip" \
             --title "Ashat Neural Host $TAG" \
             --notes "ANH $TAG: drop a .gguf in models/, npm start, open the site. See README for per-OS setup."

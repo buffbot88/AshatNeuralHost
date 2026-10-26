@@ -1,4 +1,7 @@
 # GGUF weights are too big for git — download per models/README.md
+# (any model file, present or future, stays local)
+*.gguf
+*.gguf.*
 # runtime
 node_modules/
 *.log
@@ -11,5 +14,5 @@ Thumbs.db
 .freebuff/
 # release staging (built by CI)
 dist/
-models/LFM2.5-2.6B-Q4_0.gguf
-models/LFM2.5-350M-Q4_0.gguf
+# local runtime config (secrets live here) — track the example, never this
+config.toml

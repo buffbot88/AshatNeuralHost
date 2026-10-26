@@ -41,6 +41,7 @@ function saveSettings() {
 const state = {
   mistralProc: null,
   mistralPid: null,
+  mistralOwned: false, // true only when THIS host spawned the engine
   mistralUp: null, // cached engine health (set by /api/status + startup)
   discord: { proc: null, pid: null, startedAt: null, up: null }, // second engine for the bot (only when it needs its own model)
   startedAt: null,
@@ -116,21 +117,26 @@ function engineLauncher() {
   return 'mistralrs';
 }
 
+function killProc(p) {
+  if (!p || p.killed || p.exitCode !== null) return;
+  const pid = p.pid;
+  try { p.kill('SIGTERM'); } catch {}
+  // Windows: taskkill the exact PID tree we own — never by image name.
+  if (process.platform === 'win32' && pid) {
+    exec(`taskkill /PID ${pid} /T /F 2>nul`, () => {});
+  }
+  setTimeout(() => { try { if (!p.killed && p.exitCode === null) p.kill('SIGKILL'); } catch {} }, 3000);
+}
 function killMistral() {
   return new Promise((resolve) => {
-    for (const p of [state.mistralProc, state.discord.proc]) {
-      if (p && !p.killed) { try { p.kill(); } catch {} }
-    }
+    // Only ever terminate processes THIS host spawned (tracked handles).
+    // Never sweep by binary name — other inference processes are not ours.
+    killProc(state.mistralProc);
+    killProc(state.discord.proc);
     state.discord.proc = null; state.discord.pid = null; state.discord.up = null;
-    // Also sweep any stray engine left behind (e.g. started before host boot).
-    // The launcher forwards to the mistralrs binary, so kill the real name.
-    const cmd = process.platform === 'win32'
-      ? 'taskkill /F /IM mistralrs.exe 2>nul'
-      : 'pkill -f mistralrs 2>/dev/null; true';
-    exec(cmd, () => {
-      state.mistralProc = null; state.mistralPid = null;
-      setTimeout(resolve, 2000);
-    });
+    state.mistralProc = null; state.mistralPid = null;
+    state.mistralOwned = false;
+    setTimeout(resolve, 2000);
   });
 }
 
@@ -166,6 +172,10 @@ function pickModelFile() {
 
 async function startMistral() {
   await killMistral();
+  if (await mistralUp()) {
+    pushError(`port ${settings.enginePort} is still in use by a process ANH did not start — free it or change [engine] port, then Restart`);
+    return false;
+  }
   const picked = pickModelFile();
   if (!picked) {
     pushError('No .gguf models in ./models — drop one in and hit Restart');
@@ -178,10 +188,11 @@ async function startMistral() {
   // RUST_LOG=warn keeps the engine's own console quiet (no per-request INFO
   // spam); real warnings and errors still come through and are captured below.
   const proc = spawn(engineLauncher(), args, {
-    shell: process.platform === 'win32', windowsHide: true,
+    shell: false, windowsHide: true,
     env: { ...process.env, RUST_LOG: process.env.RUST_LOG || 'warn' },
   });
   state.mistralProc = proc;
+  state.mistralOwned = true;
   state.mistralPid = proc.pid ?? null;
   state.startedAt = new Date().toISOString();
   proc.stdout.on('data', (d) => String(d).split('\n').forEach(pushLog));
@@ -243,14 +254,14 @@ function discordNeedsOwnEngine() {
 async function startDiscordEngine() {
   const d = settings.discord;
   const modelFile = d.model || settings.modelFile;
-  const port = d.model && d.model !== settings.modelFile ? (d.port || 1235) : settings.enginePort;
+  const port = discordOwnPort();
   const maxLen = d.context || 0;
   const modelPath = path.join(MODELS_DIR, modelFile);
   const args = ['serve', '-f', modelPath, '--cpu', '--host', '127.0.0.1', '--port', String(port),
     ...(maxLen > 0 ? ['--max-model-len', String(maxLen)] : [])];
   pushLog(`$ ashat (discord) ${args.join(' ')}`);
   const proc = spawn(engineLauncher(), args, {
-    shell: process.platform === 'win32', windowsHide: true,
+    shell: false, windowsHide: true,
     env: { ...process.env, RUST_LOG: process.env.RUST_LOG || 'warn' },
   });
   state.discord.proc = proc;
@@ -281,7 +292,7 @@ function discordEngineStatus() {
     wanted: d.enabled && !!d.token,
     shared,
     up: shared ? state.mistralUp : (own ? state.discord.up : false),
-    port: (d.model && d.model !== settings.modelFile) ? (d.port || 1235) : settings.enginePort,
+    port: shared ? settings.enginePort : discordOwnPort(),
     model: d.model || settings.modelFile,
     context: d.context || settings.engineContext || 4096,
     compact: { enabled: d.compactEnabled, strategy: d.compactStrategy, reserve: d.compactReserve },
@@ -304,13 +315,54 @@ function sendJson(res, code, obj) {
   res.end(JSON.stringify(obj));
 }
 function readBody(req) {
-  return new Promise((resolve) => {
+  return new Promise((resolve, reject) => {
     let b = '';
-    req.on('data', (c) => { b += c; if (b.length > 5e6) req.destroy(); });
+    req.on('data', (c) => { b += c; if (b.length > 5e6) { reject(new Error('Body too large')); req.destroy(); } });
     req.on('end', () => {
-      try { resolve(b ? JSON.parse(b) : {}); } catch { resolve({}); }
+      if (!b) return resolve({});
+      try { resolve(JSON.parse(b)); } catch { reject(new Error('Invalid JSON')); }
     });
+    req.on('error', reject);
   });
+}
+async function readJsonBody(req, res) {
+  try { return await readBody(req); }
+  catch (e) { sendJson(res, 400, { error: e.message || 'Invalid JSON' }); return null; }
+}
+function requireAdmin(req) {
+  // State-changing host endpoints need the inference key once one exists.
+  // Open installs (no key) stay frictionless; keyed installs are admin-gated.
+  if (!settings.apiKey) return true;
+  return keyValid(req);
+}
+function discordOwnPort() {
+  // A second engine can never share the main port — force a distinct one.
+  const want = settings.discord.port || (settings.enginePort === 1235 ? 1236 : 1235);
+  if (want !== settings.enginePort) return want;
+  let p = want + 1;
+  if (p > 65535) p = 1024;
+  if (p === settings.enginePort) p++;
+  return p;
+}
+async function proxyStream(upstreamRes, clientRes) {
+  // Transparent SSE passthrough: preserves tool-call deltas + finish reasons.
+  clientRes.writeHead(upstreamRes.status, {
+    'Content-Type': upstreamRes.headers.get('content-type') || 'text/event-stream; charset=utf-8',
+    'Cache-Control': 'no-cache',
+    'Connection': 'keep-alive',
+    'X-Accel-Buffering': 'no',
+  });
+  state.stats.requests++;
+  try {
+    const { Readable } = require('stream');
+    await new Promise((resolve, reject) => {
+      const nodeStream = Readable.fromWeb(upstreamRes.body);
+      nodeStream.on('error', reject);
+      clientRes.on('close', () => { try { nodeStream.destroy(); } catch {} resolve(); });
+      nodeStream.pipe(clientRes);
+      nodeStream.on('end', resolve);
+    });
+  } catch (e) { try { clientRes.end(); } catch {} }
 }
 function keyValid(req) {
   // Constant-time compare: the key check must not leak via timing.
@@ -359,13 +411,23 @@ const server = http.createServer(async (req, res) => {
     }
     if (url.pathname === '/v1/chat/completions' && req.method === 'POST') {
       if (!checkKey(req)) return sendJson(res, 401, { error: 'Invalid API key' });
+      const body = await readJsonBody(req, res);
+      if (!body) return;
       if (!(await mistralUp())) return sendJson(res, 503, { error: 'Engine offline' });
-      const body = await readBody(req);
+      if (!Array.isArray(body.messages)) return sendJson(res, 400, { error: 'messages must be an array' });
       const wantModel = body.model || 'ashat';
       const r = await fetch(`${mistralBase()}/v1/chat/completions`, {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ ...body, model: 'default', messages: lib.ensurePersona(settings, await applyMainPolicy({ ...body, messages: body.messages })) }),
       });
+      if (body.stream) {
+        if (!r.ok) {
+          let j = {}; try { j = await r.json(); } catch {}
+          pushError(`chat completions ${r.status}: ${JSON.stringify(j).slice(0, 200)}`);
+          return sendJson(res, r.status, j && j.error ? j : { error: 'Engine error' });
+        }
+        return proxyStream(r, res);
+      }
       const j = await r.json();
       if (r.ok) { recordCompletion(j.usage); j.model = wantModel; }
       else pushError(`chat completions ${r.status}: ${JSON.stringify(j).slice(0, 200)}`);
@@ -376,8 +438,10 @@ const server = http.createServer(async (req, res) => {
     if (url.pathname === '/api/status') {
       const up = await mistralUp();
       state.mistralUp = up; // cached so /api/metrics doesn't re-hit the engine
+      const mu = process.memoryUsage();
       return sendJson(res, 200, {
         host: 'Ashat Neural Host',
+        hostMem: { rss: mu.rss, heapUsed: mu.heapUsed, free: os.freemem(), total: os.totalmem(), load1: os.loadavg()[0] },
         engine: { up, port: settings.enginePort, pid: state.mistralPid, startedAt: state.startedAt, model: settings.modelFile, modelId: 'ashat', context: settings.engineContext || 4096,
           compact: { enabled: settings.compactEnabled, strategy: settings.compactStrategy, reserve: settings.compactReserve } },
         discordEngine: discordEngineStatus(),
@@ -397,29 +461,44 @@ const server = http.createServer(async (req, res) => {
       return sendJson(res, 200, { models, current: settings.modelFile, sizes });
     }
     if (url.pathname === '/api/chat' && req.method === 'POST') {
+      if (!checkKey(req)) return sendJson(res, 401, { error: 'Invalid API key — save it in this browser (Settings → Access) or revoke it.' });
+      const body = await readJsonBody(req, res);
+      if (!body) return;
       if (!(await mistralUp())) return sendJson(res, 503, { error: 'Engine offline' });
-      const body = await readBody(req);
+      if (body.messages !== undefined && !Array.isArray(body.messages)) return sendJson(res, 400, { error: 'messages must be an array' });
       const r = await fetch(`${mistralBase()}/v1/chat/completions`, {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ model: 'default', temperature: 0.7, max_tokens: 512, ...body, messages: lib.ensurePersona(settings, await applyMainPolicy({ max_tokens: 512, ...body, messages: body.messages })) }),
       });
+      if (body.stream) {
+        if (!r.ok) {
+          let j = {}; try { j = await r.json(); } catch {}
+          return sendJson(res, r.status, j && j.error ? j : { error: 'Engine error' });
+        }
+        return proxyStream(r, res);
+      }
       const j = await r.json();
       if (r.ok) recordCompletion(j.usage);
       else pushError(`chat ${r.status}: ${JSON.stringify(j).slice(0, 200)}`);
       return sendJson(res, r.status, j);
     }
     if (url.pathname === '/api/restart' && req.method === 'POST') {
+      if (!requireAdmin(req)) return sendJson(res, 401, { error: 'Admin key required' });
       pushLog('restart requested');
       const ok = await startMistral();
       return sendJson(res, 200, { ok });
     }
     if (url.pathname === '/api/shutdown' && req.method === 'POST') {
+      if (!requireAdmin(req)) return sendJson(res, 401, { error: 'Admin key required' });
       pushLog('shutdown requested');
       await killMistral();
       return sendJson(res, 200, { ok: true });
     }
     if (url.pathname === '/api/model/select' && req.method === 'POST') {
-      const { file } = await readBody(req);
+      if (!requireAdmin(req)) return sendJson(res, 401, { error: 'Admin key required' });
+      const parsed = await readJsonBody(req, res);
+      if (!parsed) return;
+      const { file } = parsed;
       if (!file || !listModels().includes(file)) return sendJson(res, 400, { error: 'Unknown model file' });
       settings.modelFile = file; saveSettings();
       pushLog(`model switched to ${file} — restarting`);
@@ -436,7 +515,9 @@ const server = http.createServer(async (req, res) => {
       });
     }
     if (url.pathname === '/api/settings' && req.method === 'POST') {
-      const b = await readBody(req);
+      if (!requireAdmin(req)) return sendJson(res, 401, { error: 'Admin key required' });
+      const b = await readJsonBody(req, res);
+      if (!b) return;
       if (typeof b.enginePort === 'number' && b.enginePort > 0 && b.enginePort < 65536) settings.enginePort = b.enginePort;
       else if (typeof b.mistralPort === 'number' && b.mistralPort > 0 && b.mistralPort < 65536) settings.enginePort = b.mistralPort; // legacy key
       let hostRestart = false;
@@ -468,16 +549,19 @@ const server = http.createServer(async (req, res) => {
       return sendJson(res, 200, { ok: true, hostRestart });
     }
     if (url.pathname === '/api/key/generate' && req.method === 'POST') {
+      if (!requireAdmin(req)) return sendJson(res, 401, { error: 'Admin key required — send the current key to rotate' });
       settings.apiKey = 'sk-' + crypto.randomBytes(24).toString('hex');
       saveSettings();
       pushLog('new OpenAI API key generated');
       return sendJson(res, 200, { apiKey: settings.apiKey, note: 'Copy now — it will only be shown once. Use as: Authorization: Bearer <key>' });
     }
     if (url.pathname === '/api/key/revoke' && req.method === 'POST') {
+      if (!requireAdmin(req)) return sendJson(res, 401, { error: 'Admin key required' });
       settings.apiKey = ''; saveSettings();
       return sendJson(res, 200, { ok: true });
     }
     if (url.pathname === '/api/discord/test' && req.method === 'POST') {
+      if (!requireAdmin(req)) return sendJson(res, 401, { error: 'Admin key required' });
       if (!settings.discord.token) return sendJson(res, 400, { error: 'No Discord bot token saved' });
       try {
         const r = await fetch('https://discord.com/api/v10/users/@me', {
@@ -540,7 +624,8 @@ server.listen(HOST_PORT, '127.0.0.1', async () => {
     console.log('ashat engine not detected — starting it...');
     startMistral();
   } else {
-    console.log('ashat engine already running — attached');
-    pushLog('host attached to running ashat engine');
+    state.mistralOwned = false; // someone else owns this listener — never kill it
+    console.log('ashat engine already running — attached (not owned, will not auto-kill)');
+    pushLog('host attached to existing ashat engine (not owned — Restart will refuse while it holds the port)');
   }
 });

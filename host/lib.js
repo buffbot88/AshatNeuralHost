@@ -116,8 +116,15 @@ function ensurePersona(settings, messages) {
 }
 
 // ---- Context estimation + auto-compaction (pure; summarize injected) ----
+// Heuristic, not a tokenizer: plain prose ~3.6 chars/token, code/tool JSON
+// (~5%+ symbol chars) is denser at ~3.0. Per-message +4 covers role framing;
+// each tool_call block costs ~20 for its JSON scaffolding.
 function estimateTokens(text) {
-  return Math.ceil(String(text ?? '').length / 4) + 4; // ~4 chars/token + per-message overhead
+  const s = String(text ?? '');
+  if (!s) return 4;
+  const symbols = (s.match(/[{}();=<>\/\[\]"':,]/g) || []).length;
+  const divisor = symbols > s.length * 0.08 ? 3.0 : 3.6;
+  return Math.ceil(s.length / divisor) + 4;
 }
 function messageText(m) {
   if (!m || !m.content) return '';
@@ -126,7 +133,12 @@ function messageText(m) {
   return String(m.content);
 }
 function messagesTokens(msgs) {
-  return msgs.reduce((a, m) => a + estimateTokens(messageText(m)), 0);
+  return msgs.reduce((a, m) => {
+    let c = estimateTokens(messageText(m));
+    if (m && Array.isArray(m.tool_calls)) c += m.tool_calls.length * 20;
+    if (m && m.tool_calls) c += estimateTokens(JSON.stringify(m.tool_calls).slice(0, 8000));
+    return a + c;
+  }, 0);
 }
 function compactTruncate(messages, budgetTokens) {
   const sys = messages.filter((m) => m && m.role === 'system');

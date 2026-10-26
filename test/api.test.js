@@ -101,6 +101,37 @@ describe('host API (engine offline)', () => {
     assert.equal(chat.status, 503);
   });
 
+  it('rejects malformed JSON with 400, not silent {}', async () => {
+    const r = await fetch(`${BASE}/v1/chat/completions`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${savedKey}` },
+      body: '{not json',
+    });
+    assert.equal(r.status, 400);
+    assert.match((await r.json()).error, /Invalid JSON/);
+  });
+
+  it('gates admin endpoints + /api/chat behind the key once set', async () => {
+    const anonRestart = await fetch(`${BASE}/api/restart`, { method: 'POST' });
+    assert.equal(anonRestart.status, 401);
+    const anonChat = await fetch(`${BASE}/api/chat`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ messages: [{ role: 'user', content: 'hi' }] }),
+    });
+    assert.equal(anonChat.status, 401);
+    const anonSettings = await fetch(`${BASE}/api/settings`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ engineContext: 1024 }),
+    });
+    assert.equal(anonSettings.status, 401);
+    // keyed admin passes auth (shutdown only touches owned PIDs → fast ok:true)
+    const keyed = await fetch(`${BASE}/api/shutdown`, {
+      method: 'POST', headers: { Authorization: `Bearer ${savedKey}` },
+    });
+    assert.equal(keyed.status, 200);
+    assert.equal((await keyed.json()).ok, true);
+  });
+
   it('blocks cross-site browser requests unless keyed', async () => {
     // A random website's fetch() sends Origin — without the key it gets 403,
     // even though the endpoint is open to curl/python (no Origin header).

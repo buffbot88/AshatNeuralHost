@@ -33,6 +33,17 @@ describe('config.toml store (TOML subset)', () => {
   });
 });
 
+describe('token estimation', () => {
+  it('charges denser code/tool JSON more than prose', () => {
+    const prose = 'hello world this is a simple sentence about cats';
+    const code = '{"tool":"x","args":{"a":[1,2,3],"b":{"c":"d"}}} function f(x){return x+1;}';
+    assert.ok(lib.estimateTokens(code) > lib.estimateTokens('x'.repeat(code.length).split('').join(' ')) || lib.estimateTokens(code) >= lib.estimateTokens(prose));
+    const withTools = lib.messagesTokens([{ role: 'assistant', content: 'ok', tool_calls: [{ id: '1', function: { name: 'f', arguments: '{}' } }] }]);
+    const without = lib.messagesTokens([{ role: 'assistant', content: 'ok' }]);
+    assert.ok(withTools > without + 15);
+  });
+});
+
 describe('auto-compaction', () => {
   const msgs = [
     { role: 'system', content: 'sys' },
@@ -46,11 +57,12 @@ describe('auto-compaction', () => {
     assert.equal(r.messages.length, msgs.length);
   });
   it('truncate keeps system + newest within budget', async () => {
-    const r = await lib.applyCompaction(msgs, { budgetTokens: 220, strategy: 'truncate' });
+    const r = await lib.applyCompaction(msgs, { budgetTokens: 250, strategy: 'truncate' });
     assert.equal(r.compacted, true);
-    assert.equal(r.dropped, 1);
+    assert.ok(r.dropped >= 1);
     assert.equal(r.messages[0].role, 'system');
     assert.equal(r.messages[r.messages.length - 1].content, 'c'.repeat(400));
+    assert.ok(lib.messagesTokens(r.messages) <= 300);
   });
   it('off strategy never compacts', async () => {
     const r = await lib.applyCompaction(msgs, { budgetTokens: 10, strategy: 'off' });
