@@ -1,7 +1,7 @@
 {
   "name": "ashat-neural-host",
   "version": "1.0.0",
-  "description": "Ashat Neural Host (AHN) — self-hosted local-AI control plane for GGUF models. Drop a model in ./models, npm start, open the site.",
+  "description": "Ashat Neural Host (ANH) — self-hosted local-AI control plane for GGUF models. Drop a model in ./models, npm start, open the site.",
   "author": "AGP Studios, inc (https://www.agpstudios.org)",
   "homepage": "https://www.agpstudios.org",
   "main": "host/server.js",

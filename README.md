@@ -1,4 +1,4 @@
-# Ashat Neural Host (AHN v1)
+# Ashat Neural Host (ANH v1)
 
 Self-hosted local-AI control plane. **Three steps, any OS:**
 
@@ -76,6 +76,32 @@ Raw engine endpoint (no key, id `default`): http://localhost:1234/v1
   dashboard chat and `/v1/chat/completions`; the bot's policy is stored
   alongside its engine for the same behavior.
 
+## Security & antivirus
+
+Short version: **there is nothing to find.** The repo contains zero
+binaries, zero dependencies (`npm install` installs nothing), zero install
+scripts, and plain-text source you can read end to end. What the app *does*
+that can look noisy to a scanner, and why it's benign:
+
+| Behavior | Why it's safe |
+|---|---|
+| Listens on `127.0.0.1:8787` (Host) and `127.0.0.1:1234` (engine) | Loopback only — unreachable from your network. The engine is explicitly bound to localhost, not `0.0.0.0`. |
+| Spawns the engine, `taskkill`/`pkill` on restart | Normal process supervision; only ever touches processes named `mistralrs`. |
+| Runs a PowerShell one-liner on first Windows start | Shows the welcome dialog (add/remove programs style message box). No downloads, no registry, no persistence. |
+| `ashat.cmd` / `ashat` launchers | 3-line forwarders to the engine binary. |
+| Discord token in `config.toml` | Required to call Discord as your bot; the file is chmodded owner-only on save, tokens are masked in the UI/API, and never logged. |
+
+Hardening already in the box: API keys compared in constant time,
+cross-site browser calls to a keyless endpoint get `403` (curl/python unaffected),
+path-traversal guard on static files, 5 MB request cap, CI runs least-privilege,
+releases ship code only (never weights or secrets).
+
+One honest expectation: the **engine binary itself** (mistral.rs, fetched by
+its installer — not from this repo) may be unsigned, so Windows SmartScreen
+can ask you to confirm it on first download. That's normal for independent
+open-source binaries: keep the official installer, check the release hashes
+on GitHub, and you're good.
+
 ## Tests
 
 ```sh
@@ -84,12 +110,16 @@ npm test   # node:test, no engine/model needed (offline assertions)
 
 ## Releases
 
-```sh
-git tag v1.0.0 && git push origin v1.0.0
-```
+No local release script — GitHub handles it end to end:
 
-CI tests on Ubuntu/Windows/macOS × Node 20/22, then the release workflow
-packages code-only artifacts (models are never shipped) onto the GitHub Release.
+1. Bump `version` in `package.json`, commit, and push to `main`.
+2. CI runs the full matrix (Ubuntu/Windows/macOS × Node 20/22).
+3. If green, the Release workflow fires automatically: it tags `vX.Y.Z`,
+   packages code-only artifacts (models are never shipped), and publishes
+   the GitHub Release. Re-running with an unchanged version is a no-op.
+
+Manual fallback: Actions → Release (ANH v1) → Run workflow. The workflow
+also refuses to ship live secrets (the test suite asserts a clean `config.toml`).
 
 ## Layout
 

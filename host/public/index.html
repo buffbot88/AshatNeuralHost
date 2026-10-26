@@ -484,7 +484,7 @@ $('btn-discord-save').onclick = async () => {
 $('btn-discord-test').onclick = async () => {
   $('discord-msg').textContent = 'Testing…';
   const j = await api('/api/discord/test', { method: 'POST' });
-  $('discord-msg').innerHTML = j.ok ? `<span class="ok-text">✓ Connected as ${j.bot.username} (${j.bot.id})</span>` : `<span style="color:var(--bad)">✗ ${j.error}</span>`;
+  $('discord-msg').innerHTML = j.ok ? `<span class="ok-text">✓ Connected as ${esc(j.bot.username)} (${esc(j.bot.id)})</span>` : `<span style="color:var(--bad)">✗ ${esc(j.error)}</span>`;
 };
 termPrint('Ashat console v1 — chat here, or type /help for host commands.', 'sys');
 refresh(); setInterval(refresh, 5000);

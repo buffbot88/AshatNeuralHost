@@ -10,7 +10,7 @@ const lib = require('./lib');
 
 const ROOT = path.join(__dirname, '..');
 const PUBLIC = path.join(__dirname, 'public');
-const CONFIG_FILE = process.env.AHN_CONFIG || path.join(ROOT, 'config.toml'); // THE settings store
+const CONFIG_FILE = process.env.ANH_CONFIG || process.env.AHN_CONFIG || path.join(ROOT, 'config.toml'); // THE settings store
 const LEGACY_SETTINGS = path.join(__dirname, 'settings.json'); // migrated once, then ignored
 const MODELS_DIR = path.join(ROOT, 'models');
 
@@ -35,6 +35,7 @@ function loadSettings() {
 let settings = loadSettings();
 function saveSettings() {
   fs.writeFileSync(CONFIG_FILE, lib.tomlSerialize(settings));
+  try { fs.chmodSync(CONFIG_FILE, 0o600); } catch {} // token lives here — owner-only, best effort
 }
 
 const state = {
@@ -171,7 +172,7 @@ async function startMistral() {
     return false;
   }
   const modelPath = path.join(MODELS_DIR, picked);
-  const args = ['serve', '-f', modelPath, '--cpu', '--port', String(settings.enginePort),
+  const args = ['serve', '-f', modelPath, '--cpu', '--host', '127.0.0.1', '--port', String(settings.enginePort),
     ...(settings.engineContext > 0 ? ['--max-model-len', String(settings.engineContext)] : [])];
   pushLog(`$ ashat ${args.join(' ')}`);
   // RUST_LOG=warn keeps the engine's own console quiet (no per-request INFO
@@ -245,7 +246,7 @@ async function startDiscordEngine() {
   const port = d.model && d.model !== settings.modelFile ? (d.port || 1235) : settings.enginePort;
   const maxLen = d.context || 0;
   const modelPath = path.join(MODELS_DIR, modelFile);
-  const args = ['serve', '-f', modelPath, '--cpu', '--port', String(port),
+  const args = ['serve', '-f', modelPath, '--cpu', '--host', '127.0.0.1', '--port', String(port),
     ...(maxLen > 0 ? ['--max-model-len', String(maxLen)] : [])];
   pushLog(`$ ashat (discord) ${args.join(' ')}`);
   const proc = spawn(engineLauncher(), args, {
@@ -311,10 +312,24 @@ function readBody(req) {
     });
   });
 }
+function keyValid(req) {
+  // Constant-time compare: the key check must not leak via timing.
+  if (!settings.apiKey) return false;
+  const h = Buffer.from(req.headers.authorization || '');
+  const want = Buffer.from(`Bearer ${settings.apiKey}`);
+  return h.length === want.length && crypto.timingSafeEqual(h, want);
+}
 function checkKey(req) {
   if (!settings.apiKey) return true; // open until a key is generated
-  const h = req.headers.authorization || '';
-  return h === `Bearer ${settings.apiKey}`;
+  return keyValid(req);
+}
+function browserOriginAllowed(req) {
+  // A malicious website can fetch() localhost from the user's browser.
+  // Non-browser clients (curl, python, same-origin UI) send no Origin.
+  // Foreign-Origin browser calls are honored only with a valid API key.
+  const o = req.headers.origin;
+  if (!o) return true;
+  return o === `http://localhost:${HOST_PORT}` || o === `http://127.0.0.1:${HOST_PORT}`;
 }
 const MIME = { '.html': 'text/html', '.js': 'text/javascript', '.css': 'text/css', '.json': 'application/json', '.svg': 'image/svg+xml', '.png': 'image/png' };
 
@@ -325,6 +340,9 @@ const server = http.createServer(async (req, res) => {
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
   if (req.method === 'OPTIONS') { res.writeHead(204); res.end(); return; }
+    if (!browserOriginAllowed(req) && !keyValid(req)) {
+      return sendJson(res, 403, { error: 'Cross-origin browser requests are blocked; call this API server-side or from the Ashat dashboard.' });
+    }
 
   try {
     // ---- OpenAI-compatible endpoint, branded as Ashat (key-protected once a key exists) ----
@@ -474,7 +492,7 @@ const server = http.createServer(async (req, res) => {
     // ---- Static UI ----
     let p = url.pathname === '/' ? '/index.html' : url.pathname;
     const fp = path.normalize(path.join(PUBLIC, p));
-    if (!fp.startsWith(PUBLIC) || !fs.existsSync(fp) || fs.statSync(fp).isDirectory()) {
+    if (!fp.startsWith(PUBLIC + path.sep) || !fs.existsSync(fp) || fs.statSync(fp).isDirectory()) {
       return sendJson(res, 404, { error: 'Not found' });
     }
     res.writeHead(200, { 'Content-Type': MIME[path.extname(fp)] || 'application/octet-stream' });
@@ -500,10 +518,10 @@ function ensureFirstRun() {
   pushLog('first run — created ' + created.join(', ') + '; waiting for a .gguf in models/');
   // Headless environments (CI, tests, services) get the log line only —
   // a modal dialog there would block forever with nobody to dismiss it.
-  if (process.env.CI || process.env.AHN_NO_DIALOG || !process.stdout.isTTY) return;
+  if (process.env.CI || process.env.ANH_NO_DIALOG || process.env.AHN_NO_DIALOG || !process.stdout.isTTY) return;
   try {
     if (process.platform === 'win32') {
-      const ps1 = path.join(os.tmpdir(), 'ahn-first-run.ps1');
+      const ps1 = path.join(os.tmpdir(), 'anh-first-run.ps1');
       fs.writeFileSync(ps1, lib.firstRunPsScript(msg));
       exec(`powershell -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "${ps1}"`, () => {});
     } else if (process.platform === 'darwin') {

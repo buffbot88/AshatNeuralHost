@@ -1,28 +1,44 @@
-name: Release (AHN v1)
+name: Release (ANH v1)
 
-# Cut a release:  git tag v1.0.0 && git push origin v1.0.0
-# The workflow tests, packages (code only — models are downloaded by users),
-# and attaches dist/* to the GitHub Release.
+# Fully GitHub-handled releases — no local tagging needed:
+#   1. Push to main (bump package.json version for a new release).
+#   2. CI runs the full matrix; if it goes green, this workflow fires.
+#   3. If no Release exists for the package.json version yet, it tags vX.Y.Z,
+#      packages code only (models are downloaded by users), and publishes it.
+# Manual fallback: Actions → Release (ANH v1) → Run workflow.
 
 on:
-  push:
-    tags: ['v*']
+  workflow_run:
+    workflows: ["CI"]
+    types: [completed]
+    branches: [main]
+  workflow_dispatch:
 
 jobs:
   release:
+    if: ${{ github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success' }}
     runs-on: ubuntu-latest
     permissions:
       contents: write
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
       - uses: actions/setup-node@v4
         with:
           node-version: 22
       - run: npm test
 
-      - name: Package
+      - name: Tag, package, publish (only if this version is new)
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          TAG="${GITHUB_REF_NAME}"
+          VER=$(node -p "require('./package.json').version")
+          TAG="v$VER"
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            echo "Release $TAG already exists — nothing to do."
+            exit 0
+          fi
           STAGE="dist/stage"
           mkdir -p "$STAGE"
           cp -r host config.toml package.json README.md LICENSE ashat ashat.cmd "$STAGE/"
@@ -31,12 +47,10 @@ jobs:
           test ! -f "$STAGE/models/"*.gguf  # never ship weights
           cd dist
           TAG="$TAG" python3 -c "import os, shutil; t = os.environ['TAG']; shutil.make_archive(f'ashat-neural-host-{t}', 'gztar', root_dir='stage', base_dir='.'); shutil.make_archive(f'ashat-neural-host-{t}', 'zip', root_dir='stage', base_dir='.')"
-          ls -la
-
-      - name: Publish GitHub Release
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          gh release create "$GITHUB_REF_NAME" dist/*.tar.gz dist/*.zip \
-            --title "Ashat Neural Host ${GITHUB_REF_NAME}" \
-            --notes "AHN ${GITHUB_REF_NAME}: drop a .gguf in models/, npm start, open the site. See README for per-OS setup."
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git tag -a "$TAG" -m "Ashat Neural Host $TAG"
+          git push origin "$TAG"
+          gh release create "$TAG" dist/*.tar.gz dist/*.zip \
+            --title "Ashat Neural Host $TAG" \
+            --notes "ANH $TAG: drop a .gguf in models/, npm start, open the site. See README for per-OS setup."

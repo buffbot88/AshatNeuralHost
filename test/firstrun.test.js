@@ -7,9 +7,9 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 
-const PORT = Number(process.env.AHN_TEST_PORT2 || 8872);
+const PORT = Number(process.env.ANH_TEST_PORT2 || 8872);
 const BASE = `http://127.0.0.1:${PORT}`;
-const TMP = fs.mkdtempSync(path.join(os.tmpdir(), 'ahn-first-'));
+const TMP = fs.mkdtempSync(path.join(os.tmpdir(), 'anh-first-'));
 const MISSING_CONFIG = path.join(TMP, 'config.toml'); // does not exist yet
 let child;
 
@@ -25,7 +25,7 @@ describe('first run (no config.toml)', () => {
   before(async () => {
     child = spawn(process.execPath, ['host/server.js'], {
       cwd: path.join(__dirname, '..'),
-      env: { ...process.env, HOST_PORT: String(PORT), AHN_CONFIG: MISSING_CONFIG },
+      env: { ...process.env, HOST_PORT: String(PORT), ANH_CONFIG: MISSING_CONFIG },
       stdio: 'ignore',
     });
     await waitUp();

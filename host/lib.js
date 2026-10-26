@@ -48,7 +48,7 @@ function tomlParse(text) {
 function tomlEscape(s) { return String(s ?? '').replace(/\\/g, '\\\\').replace(/"/g, '\\"'); }
 function tomlSerialize(s) {
   const d = s.discord, p = s.persona;
-  return `# Ashat Neural Host — THE settings file. Everything lives here.\n# Managed by the Host + Settings page (http://localhost:${s.hostPort}) — safe to edit by hand too.\n#\n# The 3-step workflow:\n#   1. Drop a .gguf model file into ./models   (auto-discovered, no config needed)\n#   2. Start AHN:  npm start\n#   3. Open the website:  http://localhost:${s.hostPort}  (port comes from [host] below)\n#\n# Engine: ashat-engine (Rust, CPU) · OpenAI-compatible model id on :${s.hostPort}/v1 is "ashat"\n\n[host]\nport = ${s.hostPort}            # website + /v1 proxy port (restart the Host to apply)
+  return `# Ashat Neural Host — THE settings file. Everything lives here.\n# Managed by the Host + Settings page (http://localhost:${s.hostPort}) — safe to edit by hand too.\n#\n# The 3-step workflow:\n#   1. Drop a .gguf model file into ./models   (auto-discovered, no config needed)\n#   2. Start ANH:  npm start\n#   3. Open the website:  http://localhost:${s.hostPort}  (port comes from [host] below)\n#\n# Engine: ashat-engine (Rust, CPU) · OpenAI-compatible model id on :${s.hostPort}/v1 is "ashat"\n\n[host]\nport = ${s.hostPort}            # website + /v1 proxy port (restart the Host to apply)
 
 [engine.context]
 size = ${s.engineContext}            # 0 = engine default; caps the context window (--max-model-len)

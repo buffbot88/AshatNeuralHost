@@ -3,7 +3,7 @@
 #
 # The 3-step workflow:
 #   1. Drop a .gguf model file into ./models   (auto-discovered, no config needed)
-#   2. Start AHN:  npm start
+#   2. Start ANH:  npm start
 #   3. Open the website:  http://localhost:8787  (port comes from [host] below)
 #
 # Engine: ashat-engine (Rust, CPU) · OpenAI-compatible model id on :8787/v1 is "ashat"
@@ -13,8 +13,8 @@ port = 8787            # website + /v1 proxy port (restart the Host to apply)
 
 [engine.context]
 size = 0            # 0 = engine default; caps the context window (--max-model-len)
-compact_enabled = true
-compact_strategy = "summarize"  # truncate | summarize — what to do when history exceeds the window
+compact_enabled = false
+compact_strategy = "truncate"  # truncate | summarize — what to do when history exceeds the window
 compact_reserve = 512         # tokens kept free for the reply + safety margin
 
 [engine]

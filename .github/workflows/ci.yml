@@ -6,6 +6,8 @@ on:
 
 jobs:
   test:
+    permissions:
+      contents: read
     name: test (node ${{ matrix.node }} / ${{ matrix.os }})
     strategy:
       fail-fast: false
